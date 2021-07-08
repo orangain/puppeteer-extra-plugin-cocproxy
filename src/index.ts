@@ -24,11 +24,11 @@ class Plugin extends PuppeteerExtraPlugin {
     };
   }
 
-  get mode() {
+  get mode(): CocproxyPluginOptions["mode"] {
     return this.opts.mode;
   }
 
-  get filesDir() {
+  get filesDir(): CocproxyPluginOptions["filesDir"] {
     return this.opts.filesDir;
   }
 
@@ -61,7 +61,11 @@ class Plugin extends PuppeteerExtraPlugin {
       });
       this._alreadyCachedRequestIds.add(request._requestId);
     } else {
-      request.continue();
+      if (this.mode === "offline") {
+        request.abort();
+      } else {
+        request.continue();
+      }
     }
   }
 
