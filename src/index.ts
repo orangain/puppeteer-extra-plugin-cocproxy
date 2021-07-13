@@ -3,7 +3,7 @@ import fs from "fs";
 import { HTTPRequest, HTTPResponse, Page } from "puppeteer";
 import { PuppeteerExtraPlugin } from "puppeteer-extra-plugin";
 
-type CocproxyPluginOptions = {
+export type CocproxyPluginOptions = {
   mode: "proxy" | "offline";
   filesDir: string;
 };
@@ -52,7 +52,13 @@ class Plugin extends PuppeteerExtraPlugin {
     const localPath = this.buildLocalPath(url);
     const fileExists = fs.existsSync(localPath);
 
-    this.debug("onRequest", { url, localPath, fileExists });
+    this.debug("onRequest", {
+      requestId: request._requestId,
+      method: request.method(),
+      url,
+      localPath,
+      fileExists,
+    });
 
     if (fileExists) {
       request.respond({
@@ -62,8 +68,10 @@ class Plugin extends PuppeteerExtraPlugin {
       this._alreadyCachedRequestIds.add(request._requestId);
     } else {
       if (this.mode === "offline") {
+        this.debug("request.abort");
         request.abort();
       } else {
+        this.debug("request.continue");
         request.continue();
       }
     }
@@ -75,20 +83,34 @@ class Plugin extends PuppeteerExtraPlugin {
     const localPath = this.buildLocalPath(originalURL);
     const alreadyCached = this._alreadyCachedRequestIds.has(request._requestId);
 
-    this.debug("onResponse", { originalURL, localPath, alreadyCached });
+    this.debug("onResponse", {
+      requestId: request._requestId,
+      originalURL,
+      localPath,
+      alreadyCached,
+      header: response.headers(),
+    });
 
     if (alreadyCached) {
       this._alreadyCachedRequestIds.delete(request._requestId);
-    } else {
-      response
-        .buffer()
-        .then((buffer) => {
-          fs.mkdirSync(path.dirname(localPath), { recursive: true });
-          fs.writeFileSync(localPath, buffer);
-        })
-        .catch((error) => {
-          throw error;
-        });
+    } else if (response.status() >= 200 && response.status() < 300) {
+      if (response.headers()["content-length"] === "0") {
+        // Avoid `Protocol error (Network.getResponseBody): No resource with given identifier found`
+        this.debug("Content is empty");
+        fs.mkdirSync(path.dirname(localPath), { recursive: true });
+        fs.writeFileSync(localPath, "");
+      } else {
+        response
+          .buffer()
+          .then((buffer) => {
+            fs.mkdirSync(path.dirname(localPath), { recursive: true });
+            fs.writeFileSync(localPath, buffer);
+          })
+          .catch((error) => {
+            this.debug("error", { originalURL });
+            throw error;
+          });
+      }
     }
   }
 
@@ -103,6 +125,6 @@ class Plugin extends PuppeteerExtraPlugin {
   }
 }
 
-module.exports = function (pluginConfig: Partial<CocproxyPluginOptions>) {
+export default function (pluginConfig: Partial<CocproxyPluginOptions>) {
   return new Plugin(pluginConfig);
-};
+}
